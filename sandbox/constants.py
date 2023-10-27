@@ -2,5 +2,5 @@
 
 # The path to the directory containing the data
 DATA_DIR = "../data"
-SAMPLE_DATA_DIR = DATA_DIR+"/sample_data"
-FULL_DATA_DIR = DATA_DIR+"/full_data"
+SAMPLE_DATA_DIR = DATA_DIR + "/sample_data"
+FULL_DATA_DIR = DATA_DIR + "/full_data"

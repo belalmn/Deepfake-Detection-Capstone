@@ -1,0 +1,5 @@
+Metadata Class:
+Metadata(DATA) -> metadata_object
+metadata_ids
+
+metadata = Metadata(DATA).metadata()

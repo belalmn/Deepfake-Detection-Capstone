@@ -2,6 +2,20 @@ import json
 import pandas as pd
 
 class Metadata:
+    """
+    Metadata class
+
+    Attributes
+    ----------
+    df : pandas.DataFrame
+        Metadata
+
+    Public Methods
+    ----------
+    metadata()
+        Get metadata
+    """
+
     def __init__(self, file_path, sample=True):
         """
         Metadata class
@@ -11,7 +25,7 @@ class Metadata:
         file_path : str or dict
             Path to json file or dictionary with paths to json files
         """
-
+        self.sample = sample
         # Load metadata
         if type(file_path) is dict:
             self._load_metadata(file_path, multiple=True, sample=sample)
@@ -20,7 +34,7 @@ class Metadata:
 
     ## Public methods
     # Get metadata
-    def get_metadata(self):
+    def metadata(self):
         """
         Get metadata
 
@@ -34,6 +48,21 @@ class Metadata:
             Metadata
         """
         return self.df
+    
+    def is_sample(self):
+        """
+        Check if metadata is a sample
+        
+        Parameters
+        ----------
+        None
+        
+        Returns
+        ----------
+        bool
+            True if metadata is a sample, False otherwise
+        """
+        return self.sample
         
     ## Private methods
     # Load metadata from json file
@@ -51,16 +80,30 @@ class Metadata:
         None
         """
         # Load metadata
-        with open(file_path) as json_file:
-            data = json.load(json_file)
-        data = pd.DataFrame.from_dict(data, orient='index')
-        data.reset_index(inplace=True)
+        data = None
+        if multiple:
+            file_paths = file_path
+            for folder, file_path in file_paths.items():
+                with open(file_path) as json_file:
+                    new_data = json.load(json_file)
+                new_data = pd.DataFrame.from_dict(data, orient='index')
+                new_data.reset_index(inplace=True)
+                data['folder'] = folder
+                data = pd.concat([data, new_data])
+        else:
+            with open(file_path) as json_file:
+                data = json.load(json_file)
+            data = pd.DataFrame.from_dict(data, orient='index')
+            data.reset_index(inplace=True)
 
         # Rename columns
         data.rename(columns={'index':'id'}, inplace=True)
         if sample:
             data.drop(columns=['split'], inplace=True)
 
+        # Remove .mp4 from all ids
+        data['id'] = data['id'].apply(lambda x: x[:-4])
+        
         # Split into original and fake datasets
         fake_df = data[data['label'] == "FAKE"]
         original_df = data[data['label'] == "REAL"]
