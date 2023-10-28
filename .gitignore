@@ -1,2 +1,4 @@
 data/sample_data
 data/full_data
+.vscode
+__pycache__

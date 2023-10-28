@@ -34,20 +34,35 @@ class Metadata:
 
     ## Public methods
     # Get metadata
-    def metadata(self):
+    def original(self):
         """
-        Get metadata
-
+        Get original metadata
+        
         Parameters
         ----------
         None
-
+        
         Returns
         ----------
-        df : pandas.DataFrame
-            Metadata
+        pandas.DataFrame
+            Original metadata
         """
-        return self.df
+        return self.original_df
+    
+    def fake(self):
+        """
+        Get fake metadata
+        
+        Parameters
+        ----------
+        None
+        
+        Returns
+        ----------
+        pandas.DataFrame
+            Fake metadata
+        """
+        return self.fake_df
     
     def is_sample(self):
         """
@@ -64,6 +79,22 @@ class Metadata:
         """
         return self.sample
         
+    def get_sample_pairs(self):
+        """
+        Get sample pairs
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        ----------
+        pandas.DataFrame
+            Sample pairs
+        """
+        df = pd.merge(self.original_df, self.fake_df, left_on='id', right_on='original', how='inner', suffixes=('_original', '_fake')).drop(columns=['original'])
+        return df
+    
     ## Private methods
     # Load metadata from json file
     def _load_metadata(self, file_path, multiple=False, sample=True):
@@ -98,8 +129,7 @@ class Metadata:
 
         # Rename columns
         data.rename(columns={'index':'id'}, inplace=True)
-        if sample:
-            data.drop(columns=['split'], inplace=True)
+        data.drop(columns=['split'], inplace=True)
 
         # Remove .mp4 from all ids
         data['id'] = data['id'].apply(lambda x: x[:-4])
@@ -110,6 +140,7 @@ class Metadata:
 
         # Clean datasets
         fake_df.drop(columns=['label'], inplace=True)
+        fake_df['original'] = fake_df['original'].apply(lambda x: x[:-4])
         original_df.drop(columns=['label', 'original'], inplace=True)
 
         self.fake_df = fake_df
