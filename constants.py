@@ -4,3 +4,4 @@
 DATA_DIR = "data"
 SAMPLE_DATA_DIR = "data/sample_data"
 FULL_DATA_DIR = "data/full_data"
+FULL_DATA_FOLDER_PREFIX = "dfdc_train_part_"
