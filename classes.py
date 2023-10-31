@@ -20,6 +20,7 @@ class Video:
         self._get_all_frame_feature_centers()
         self._get_all_frame_feature_distances()
         self._get_all_frame_feature_velocities()
+        self.face_detections = []  # Initialize the list to track face detections
 
     ## Public Methods
     def showVideo(self):
@@ -543,7 +544,22 @@ class Video:
         print(f"Loading frames for video {self.id}...")
         for frame_number in _tqdm(range(frameLimit)):
             self.frames.append(Frame(self.cap, self, frame_number))
+        for frame in self.frames:
+            self.face_detections.append(frame.hasFace())
 
+    def getFaceDetectionPercentage(self):
+        """
+        Compute the percentage of successful face detections throughout the video.
+
+        Returns
+        ----------
+        float
+            Percentage of successful face detections.
+        """
+        successful_detections = sum(self.face_detections)
+        total_frames = len(self.face_detections)
+        return (successful_detections / total_frames) * 100
+    
     def _get_all_frame_features(self):
         """
         Get all features for all frames
@@ -790,7 +806,28 @@ class Frame:
         if self.face_locations is None:
             return None
         return self.face_locations[0]
+    
+    def hasFace(self):
+        """
+        Check if a face was detected in the frame.
 
+        Returns
+        ----------
+        bool
+            True if a face was detected, False otherwise.
+        """
+        # Check if any of the facial landmarks are not empty
+        landmark_attributes = [
+            self.chin, self.left_eyebrow, self.right_eyebrow,
+            self.nose_bridge, self.nose_tip, self.left_eye,
+            self.right_eye, self.top_lip, self.bottom_lip
+        ]
+        
+        for landmark in landmark_attributes:
+            if landmark:
+                return True
+        return False
+    
     def drawFaceLandmarks(self, color=(255, 255, 255), stroke=2):
         # Create blank image of same size as frame
         pil_image = Image.fromarray(self.frame)
@@ -888,6 +925,7 @@ class Frame:
             self.getFeatureCentralPosition(feature)[1]
             - other_frame.getFeatureCentralPosition(feature)[1],
         )
+    
     
     ## Private Methods
     def _get_frame(self):
