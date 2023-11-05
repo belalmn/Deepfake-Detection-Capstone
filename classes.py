@@ -10,9 +10,12 @@ from tqdm import tqdm
 from tqdm.notebook import tqdm as tqdm_notebook
 from numba import jit
 import json
+import os
 
 class Video:
-    def __init__(self, metadata, id, frameLimit=150, sample=True, tq="notebook"):
+    def __init__(self, metadata:'Metadata', id, frameLimit=150, sample=True, tq="notebook"):
+        self.face_detections = []  # Initialize the list to track face detections
+        self.metadata = metadata
         self._get_file_path(metadata, id, sample=sample)
         self._load_video_metadata()
         self._load_frames(frameLimit=frameLimit, tq=tq)
@@ -20,7 +23,6 @@ class Video:
         self._get_all_frame_feature_centers()
         self._get_all_frame_feature_distances()
         self._get_all_frame_feature_velocities()
-        self.face_detections = []  # Initialize the list to track face detections
 
     ## Public Methods
     def showVideo(self):
@@ -465,11 +467,21 @@ class Video:
         float
             Variance of feature's velocity
         """
-        feature_df = self.getFeatureDf(feature)
-        if feature_df is None:
-            print("Invalid feature")
-            return
-        return np.var(feature_df["velocity_x"]) + np.var(feature_df["velocity_y"])
+        feature_velocity_var_x, feature_velocity_var_y = self._get_all_velocity_variance()
+        return feature_velocity_var_x[feature], feature_velocity_var_y[feature]
+    
+    def getFaceDetectionPercentage(self):
+        """
+        Compute the percentage of successful face detections throughout the video.
+
+        Returns
+        ----------
+        float
+            Percentage of successful face detections.
+        """
+        successful_detections = sum(self.face_detections)
+        total_frames = len(self.face_detections)
+        return (successful_detections / total_frames) * 100
     
     ## Private Methods
     def _get_file_path(self, metadata: "Metadata", id, sample):
@@ -493,14 +505,15 @@ class Video:
         folder_path = (
             c.SAMPLE_DATA_DIR
             if sample
-            else c.FULL_DATA_DIR + folder_prefix + metadata[id]["folder"]
+            else c.FULL_DATA_DIR + '/' + folder_prefix + metadata.getFolder(id)
         )
         file_path = folder_path
         file_name = "/" + str(id) + ".mp4"
         if sample:
             file_path += file_name
         else:
-            file_path += "/" + metadata[id]["folder"] + file_name
+            file_path += file_name
+        print(file_path)
         self.file_path = file_path
         self.id = id
 
@@ -519,9 +532,10 @@ class Video:
         self.cap = cv.VideoCapture(self.file_path)
         self.fps = self.cap.get(cv.CAP_PROP_FPS)
         self.frame_count = int(self.cap.get(cv.CAP_PROP_FRAME_COUNT))
-        self.duration = self.frame_count / self.fps
+        # self.duration = self.frame_count / self.fps
         self.width = int(self.cap.get(cv.CAP_PROP_FRAME_WIDTH))
         self.height = int(self.cap.get(cv.CAP_PROP_FRAME_HEIGHT))
+        pass
 
     def _load_frames(self, frameLimit, tq):
         """
@@ -546,19 +560,6 @@ class Video:
             self.frames.append(Frame(self.cap, self, frame_number))
         for frame in self.frames:
             self.face_detections.append(frame.hasFace())
-
-    def getFaceDetectionPercentage(self):
-        """
-        Compute the percentage of successful face detections throughout the video.
-
-        Returns
-        ----------
-        float
-            Percentage of successful face detections.
-        """
-        successful_detections = sum(self.face_detections)
-        total_frames = len(self.face_detections)
-        return (successful_detections / total_frames) * 100
     
     def _get_all_frame_features(self):
         """
@@ -584,18 +585,26 @@ class Video:
             "bottom_lip": [],
         }
         for frame in self.frames:
+            if not frame.hasFace():
+                print("Frame has no face")
+                for feature in features:
+                    features[feature].append(None)
+                continue
             for feature in features:
-                features[feature].append(frame.getFeature(feature))
+                f = frame.getFeature(feature)
+                if f is None:
+                    print(f"Feature {feature} is None")
+                features[feature].append(f)
 
-        self.chin = pd.DataFrame.from_records(features["chin"])
-        self.left_eyebrow = pd.DataFrame.from_records(features["left_eyebrow"])
-        self.right_eyebrow = pd.DataFrame.from_records(features["right_eyebrow"])
-        self.nose_bridge = pd.DataFrame.from_records(features["nose_bridge"])
-        self.nose_tip = pd.DataFrame.from_records(features["nose_tip"])
-        self.left_eye = pd.DataFrame.from_records(features["left_eye"])
-        self.right_eye = pd.DataFrame.from_records(features["right_eye"])
-        self.top_lip = pd.DataFrame.from_records(features["top_lip"])
-        self.bottom_lip = pd.DataFrame.from_records(features["bottom_lip"])
+        self.chin = pd.Series(features["chin"]) if features["chin"] is not None else None
+        self.left_eyebrow = pd.Series(features["left_eyebrow"]) if features["left_eyebrow"] is not None else None
+        self.right_eyebrow = pd.Series(features["right_eyebrow"]) if features["right_eyebrow"] is not None else None
+        self.nose_bridge = pd.Series(features["nose_bridge"]) if features["nose_bridge"] is not None else None
+        self.nose_tip = pd.Series(features["nose_tip"]) if features["nose_tip"] is not None else None
+        self.left_eye = pd.Series(features["left_eye"]) if features["left_eye"] is not None else None
+        self.right_eye = pd.Series(features["right_eye"]) if features["right_eye"] is not None else None
+        self.top_lip = pd.Series(features["top_lip"]) if features["top_lip"] is not None else None
+        self.bottom_lip = pd.Series(features["bottom_lip"]) if features["bottom_lip"] is not None else None
 
     def _get_all_frame_feature_centers(self):
         """
@@ -621,6 +630,10 @@ class Video:
             "bottom_lip": [],
         }
         for frame in self.frames:
+            if not frame.hasFace():
+                for feature in feature_centers:
+                    feature_centers[feature].append(None)
+                continue
             for feature in feature_centers:
                 feature_centers[feature].append(
                     frame.getFeatureCentralPosition(feature)
@@ -661,6 +674,11 @@ class Video:
         }
 
         for frame_number in range(1, len(self.frames)):
+            if not self.frames[frame_number].hasFace() or not self.frames[
+                frame_number - 1].hasFace() or not self.frames[frame_number - 2].hasFace():
+                for feature in feature_distances:
+                    feature_distances[feature].append(None)
+                continue
             for feature in feature_distances:
                 feature_distances[feature].append(
                     self.frames[frame_number].getFeatureDistance(
@@ -714,31 +732,13 @@ class Video:
             "bottom_lip": [None, None],
         }
 
-        feature_velocity_variance_x = {
-            "chin": [None, None],
-            "left_eyebrow": [None, None],
-            "right_eyebrow": [None, None],
-            "nose_bridge": [None, None],
-            "nose_tip": [None, None],
-            "left_eye": [None, None],
-            "right_eye": [None, None],
-            "top_lip": [None, None],
-            "bottom_lip": [None, None],
-        }
-
-        feature_velocity_variance_y = {
-            "chin": [None, None],
-            "left_eyebrow": [None, None],
-            "right_eyebrow": [None, None],
-            "nose_bridge": [None, None],
-            "nose_tip": [None, None],
-            "left_eye": [None, None],
-            "right_eye": [None, None],
-            "top_lip": [None, None],
-            "bottom_lip": [None, None],
-        }
-
         for frame_number in range(2, len(self.frames)):
+            if not self.frames[frame_number].hasFace() or not self.frames[
+                frame_number - 1].hasFace() or not self.frames[frame_number - 2].hasFace():
+                for feature in feature_velocity_x:
+                    feature_velocity_x[feature].append(None)
+                    feature_velocity_y[feature].append(None)
+                continue
             for feature in feature_velocity_x:
                 distance_1_x, distance_1_y = self.frames[
                     frame_number - 2
@@ -788,6 +788,112 @@ class Video:
             feature_velocity_y["bottom_lip"],
         )
 
+    def _get_all_velocity_variance(self):
+        feature_names = [
+            "chin",
+            "left_eyebrow",
+            "right_eyebrow",
+            "nose_bridge",
+            "nose_tip",
+            "left_eye",
+            "right_eye",
+            "top_lip",
+            "bottom_lip"
+        ]
+        feature_velocity_var_x = {}
+        feature_velocity_var_y = {}
+        for feature in feature_names:
+            velocity_x = self.getFeatureDf(feature)["velocity_x"]
+            velocity_y = self.getFeatureDf(feature)["velocity_y"]
+            velocity_x = pd.Series([v for v in velocity_x if v is not None])
+            velocity_y = pd.Series([v for v in velocity_y if v is not None])
+            feature_velocity_var_x[feature] = np.var(velocity_x)
+            feature_velocity_var_y[feature] = np.var(velocity_y)
+        return feature_velocity_var_x, feature_velocity_var_y
+
+    def _export_features(self, folder_path):
+        """
+        Compile and export all features to json
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        ----------
+        None
+        """
+        compiled_frames = {}
+        for frame in self.frames:
+            frame_number = frame.frame_number
+            landmarks = frame._get_all_landmarks_as_dict()
+            frame_data = {}
+
+            # Landmarks
+            for feature in landmarks:
+                if landmarks[feature] is None:
+                    frame_data[feature] = None
+                else:
+                    frame_data[feature] = landmarks[feature]
+            
+            # Distances
+            for feature in landmarks:
+                if landmarks[feature] is None or frame_number < 1:
+                    frame_data[f"{feature}_xdist"] = None
+                    frame_data[f"{feature}_ydist"] = None
+                else:
+                    if compiled_frames[frame_number - 1][f"{feature}_xdist"] is None or compiled_frames[frame_number - 1][f"{feature}_ydist"] is None:
+                        frame_data[f"{feature}_xdist"] = None
+                        frame_data[f"{feature}_ydist"] = None
+                        continue
+                    xdist, ydist = frame.getXYDistance(self.frames[frame_number - 1], feature)
+                    frame_data[f"{feature}_xdist"] = xdist
+                    frame_data[f"{feature}_ydist"] = ydist
+
+            # Velocities
+            for feature in landmarks:
+                if landmarks[feature] is None or frame_number < 2:
+                    frame_data[f"{feature}_xvel"] = None
+                    frame_data[f"{feature}_yvel"] = None
+                else:
+                    distance_1_x = compiled_frames[frame_number - 2][f"{feature}_xdist"]
+                    distance_1_y = compiled_frames[frame_number - 2][f"{feature}_ydist"]
+                    distance_2_x = compiled_frames[frame_number - 1][f"{feature}_xdist"]
+                    distance_2_y = compiled_frames[frame_number - 1][f"{feature}_ydist"]
+                    if distance_1_x is None or distance_1_y is None or distance_2_x is None or distance_2_y is None:
+                        frame_data[f"{feature}_xvel"] = None
+                        frame_data[f"{feature}_yvel"] = None
+                        continue
+                    xvel = distance_2_x - distance_1_x
+                    yvel = distance_2_y - distance_1_y
+                    frame_data[f"{feature}_xvel"] = xvel
+                    frame_data[f"{feature}_yvel"] = yvel
+
+            compiled_frames[frame_number] = frame_data
+        feature_names = [
+            "chin",
+            "left_eyebrow",
+            "right_eyebrow",
+            "nose_bridge",
+            "nose_tip",
+            "left_eye",
+            "right_eye",
+            "top_lip",
+            "bottom_lip"
+        ]
+        overall_features = {}
+        for feature in feature_names:
+            feature_velocity_var_x, feature_velocity_var_y = self.getVelocityVariance(feature)
+            overall_features[feature + "_xvel_var"] = feature_velocity_var_x
+            overall_features[feature + "_yvel_var"] = feature_velocity_var_y
+        overall_features["face_detection_percentage"] = self.getFaceDetectionPercentage()
+        overall_features["label"] = self.metadata.label(self.id)
+        compiled_frames["overall_features"] = overall_features
+
+        with open(folder_path + self.id + ".json", "w") as outfile:
+            json.dump(compiled_frames, outfile)
+
+
 class Frame:
     def __init__(self, cap, video, frame_number):
         self.cap = cap
@@ -799,6 +905,9 @@ class Frame:
         self._get_face_landmarks()
 
     ## Public Methods
+    def frame_number(self):
+        return self.frame_number
+    
     def getFrame(self):
         return self.frame
 
@@ -816,7 +925,7 @@ class Frame:
         bool
             True if a face was detected, False otherwise.
         """
-        # Check if any of the facial landmarks are not empty
+        # Check if all of the facial landmarks are not empty
         landmark_attributes = [
             self.chin, self.left_eyebrow, self.right_eyebrow,
             self.nose_bridge, self.nose_tip, self.left_eye,
@@ -824,9 +933,9 @@ class Frame:
         ]
         
         for landmark in landmark_attributes:
-            if landmark:
-                return True
-        return False
+            if landmark is None:
+                return False
+        return True
     
     def drawFaceLandmarks(self, color=(255, 255, 255), stroke=2):
         # Create blank image of same size as frame
@@ -888,11 +997,8 @@ class Frame:
         float
             Distance between the feature centers
         """
-        if (
-            self.getFeatureLength(feature) == 0
-            or other_frame.getFeatureLength(feature) == 0
-        ):
-            return -1
+        if (not self.hasFace() or not other_frame.hasFace()):
+            return None
         return np.linalg.norm(
             self.getFeatureCentralPosition(feature)
             - other_frame.getFeatureCentralPosition(feature)
@@ -914,11 +1020,8 @@ class Frame:
         float
             Distance between the feature centers
         """
-        if (
-            self.getFeatureLength(feature) == 0
-            or other_frame.getFeatureLength(feature) == 0
-        ):
-            return -1
+        if (not self.hasFace() or not other_frame.hasFace()):
+            return None
         return (
             self.getFeatureCentralPosition(feature)[0]
             - other_frame.getFeatureCentralPosition(feature)[0],
@@ -968,6 +1071,31 @@ class Frame:
             self.right_eye = face[0]["right_eye"]
             self.top_lip = face[0]["top_lip"]
             self.bottom_lip = face[0]["bottom_lip"]
+    
+    def _get_all_landmarks_as_dict(self):
+        """
+        Get all landmarks as a dictionary
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        ----------
+        dict
+            Dictionary of all landmarks
+        """
+        return {
+            "chin": self.chin,
+            "left_eyebrow": self.left_eyebrow,
+            "right_eyebrow": self.right_eyebrow,
+            "nose_bridge": self.nose_bridge,
+            "nose_tip": self.nose_tip,
+            "left_eye": self.left_eye,
+            "right_eye": self.right_eye,
+            "top_lip": self.top_lip,
+            "bottom_lip": self.bottom_lip,
+        }
 
 
 class Metadata:
@@ -1031,6 +1159,27 @@ class Metadata:
             Fake metadata
         """
         return self.fake_df
+    
+    def label(self, id):
+        """
+        Get label of video
+
+        Parameters
+        ----------
+        id : str
+            Video id
+
+        Returns
+        ----------
+        str
+            Label of video
+        """
+        if id in self.original_df["id"].values:
+            return "REAL"
+        elif id in self.fake_df["id"].values:
+            return "FAKE"
+        else:
+            return None
 
     def is_sample(self):
         """
@@ -1069,6 +1218,48 @@ class Metadata:
             suffixes=("_original", "_fake"),
         ).drop(columns=["original"])
         return df
+    
+    def balanced(self):
+        # Balance the dataframe so that original and fake videos alternate in the dataframe
+        original_df = self.original()
+        fake_df = self.fake()
+        balanced_df = []
+        for i in range(len(original_df)):
+            balanced_df.append(original_df.iloc[i])
+            balanced_df.append(fake_df.iloc[i])
+        balanced_df = pd.DataFrame(balanced_df)
+        return balanced_df
+    
+    def df(self):
+        """
+        Get metadata
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        ----------
+        pandas.DataFrame
+            Metadata
+        """
+        return self.df
+    
+    def getFolder(self, id):
+        """
+        Get folder of video
+
+        Parameters
+        ----------
+        id : str
+            Video id
+
+        Returns
+        ----------
+        str
+            Folder of video
+        """
+        return self.df[self.df["id"] == id]["folder"].values[0]
 
     ## Private methods
     def _load_metadata(self, file_path, multiple=False, sample=True):
@@ -1087,13 +1278,13 @@ class Metadata:
         # Load metadata
         data = None
         if multiple:
-            file_paths = file_path
-            for folder, file_path in file_paths.items():
-                with open(file_path) as json_file:
+            for folder in os.listdir(file_path):
+                folder_number = folder.split("_")[-1]
+                with open(file_path + '/' + folder + "/metadata.json") as json_file:
                     new_data = json.load(json_file)
-                new_data = pd.DataFrame.from_dict(data, orient="index")
+                new_data = pd.DataFrame.from_dict(new_data, orient="index")
                 new_data.reset_index(inplace=True)
-                data["folder"] = folder
+                new_data["folder"] = folder_number
                 data = pd.concat([data, new_data])
         else:
             with open(file_path) as json_file:
@@ -1107,6 +1298,7 @@ class Metadata:
 
         # Remove .mp4 from all ids
         data["id"] = data["id"].apply(lambda x: x[:-4])
+        self.df = data[['id', 'label', 'folder']]
 
         # Split into original and fake datasets
         fake_df = data[data["label"] == "FAKE"]

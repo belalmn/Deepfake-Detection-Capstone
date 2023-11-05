@@ -1,4 +1,7 @@
 data/sample_data
 data/full_data
+data/landmarks
 .vscode
 __pycache__
+data/full_metadata.csv
+data/dfdc_train_all.zip
